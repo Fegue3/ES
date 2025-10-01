@@ -1,0 +1,109 @@
+# docker-compose.yml
+# -----------------------------------------------------------------------------
+# Incident Management System – DEV stack
+# Serviços: PostgreSQL (DB), Redis (cache/pubsub), Backend NestJS (opcional)
+# Coloca este ficheiro na raiz do projeto e corre: `docker compose up -d`
+# -----------------------------------------------------------------------------
+
+version: "3.9"
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL – Base de Dados relacional
+  # - Usa imagem oficial Postgres 15 (leve e estável)
+  # - Persistência via volume nomeado (pgdata)
+  # - Healthcheck para garantir readiness antes de outros serviços subirem
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:15
+    container_name: incidents_db
+    environment:
+      POSTGRES_DB: incidentsdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"            # Expor para o host (Ferramentas: psql/pgAdmin/DBeaver)
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # (Opcional) seed inicial via SQL:
+      # - ./backend/prisma/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d incidentsdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # ---------------------------------------------------------------------------
+  # Redis – Cache, Pub/Sub e Filas
+  # - Útil para notificações, invalidar cache, rate limiting, locks, etc.
+  # - Persistência leve via volume (apenas dev)
+  # - Healthcheck simples com `redis-cli ping`
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: incidents_redis
+    ports:
+      - "6379:6379"            # Expor para o host (opcional, útil em dev)
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # ---------------------------------------------------------------------------
+  # Backend API (NestJS) – Opcional em DEV
+  # - Em projetos ES, muita gente corre o Nest localmente (hot-reload mais rápido).
+  # - Mantemos este serviço para “one-command dev” na equipa ou para demos.
+  # - Bind mount do código + volume dedicado a node_modules para evitar conflitos.
+  # - Migrations aplicadas antes do arranque para garantir schema consistente.
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: incidents_api
+    environment:
+      NODE_ENV: development
+      # Se o backend corre DENTRO do compose, usar o hostname do serviço "postgres":
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/incidentsdb?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: change_me         # Em prod, usar segredo/chaves via secrets/vars seguras
+      PORT: 3000
+    ports:
+      - "3000:3000"                # API disponível em http://localhost:3000
+    volumes:
+      - ./backend:/app             # Código em hot-reload (start:dev)
+      - api_node_modules:/app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Instala deps, aplica migrations e arranca em modo watch
+    command: sh -lc "npm ci && npx prisma migrate deploy && npm run start:dev"
+    restart: unless-stopped
+    networks:
+      - app-network
+
+# -----------------------------------------------------------------------------
+# Volumes nomeados (persistência local)
+# -----------------------------------------------------------------------------
+volumes:
+  pgdata:
+  redis_data:
+  api_node_modules:
+
+# -----------------------------------------------------------------------------
+# Rede interna (DNS interno por nome de serviço: postgres, redis, backend)
+# -----------------------------------------------------------------------------
+networks:
+  app-network:
+    driver: bridge
