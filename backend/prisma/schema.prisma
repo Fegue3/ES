@@ -1,0 +1,52 @@
+//TBD
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum IncidentStatus {
+  NEW
+  TRIAGED
+  IN_PROGRESS
+  ON_HOLD
+  RESOLVED
+  CLOSED
+  REOPENED
+}
+
+enum Priority {
+  P1
+  P2
+  P3
+  P4
+}
+
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  name      String
+  password  String
+  role      String    @default("REPORTER")
+  incidents Incident[] @relation("Reporter")
+  assigned  Incident[] @relation("Assignee")
+  createdAt DateTime  @default(now())
+}
+
+model Incident {
+  id          String         @id @default(cuid())
+  title       String
+  description String
+  status      IncidentStatus @default(NEW)
+  priority    Priority       @default(P3)
+  reporter    User           @relation("Reporter", fields: [reporterId], references: [id])
+  reporterId  String
+  assignee    User?          @relation("Assignee", fields: [assigneeId], references: [id])
+  assigneeId  String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+}
