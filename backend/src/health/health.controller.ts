@@ -1,27 +1,27 @@
-import { Controller, Get } from '@nestjs/common';
-import {
-  HealthCheck,
-  HealthCheckService,
-  HttpHealthIndicator,
-  DiskHealthIndicator,
-} from '@nestjs/terminus';
+import { Controller, Get, HttpCode } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Controller('health')
 export class HealthController {
-  constructor(
-    private health: HealthCheckService,
-    private http: HttpHealthIndicator,
-    private disk: DiskHealthIndicator,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   @Get()
-  @HealthCheck()
-  check() {
-    return this.health.check([
-      // verifica se a app responde a si mesma
-      () => this.http.pingCheck('self', 'http://localhost:3000'),
-      // verifica espaço em disco (limite 250MB livres neste exemplo)
-      () => this.disk.checkStorage('disk', { path: '/', thresholdPercent: 0.9 }),
-    ]);
+  @HttpCode(200)
+  async health() {
+    let db = true;
+
+    try {
+      // ping simples à BD (Postgres)
+      await this.prisma.$queryRaw`SELECT 1`;
+    } catch {
+      db = false;
+    }
+
+    return {
+      status: db ? 'ok' : 'degraded',
+      checks: { db },
+      uptime: Math.round(process.uptime()),
+      timestamp: new Date().toISOString(),
+    };
   }
 }
