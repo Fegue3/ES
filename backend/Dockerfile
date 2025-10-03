@@ -27,16 +27,15 @@ ENV NODE_ENV=production
 COPY package*.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-# (opcional mas útil: manter prisma/ para migrate deploy no arranque)
+# (opcional: manter prisma/ para migrate deploy no arranque)
 COPY --from=build /app/prisma ./prisma
+
+# Garante que o Prisma CLI existe no runtime (remove se o "prisma" já for dep de produção)
+RUN npm i -g prisma
 
 # Porta da API
 EXPOSE 3000
 
-# Script de arranque: aplica migrations e arranca a API
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-ENTRYPOINT ["/entrypoint.sh"]
-
-# Arranque padrão (podes sobrescrever no compose/k8s)
-CMD ["node", "dist/main.js"]
+# Arranque padrão: se houver DATABASE_URL, aplica migrations; depois arranca a API
+# Observação: usar "sh -lc" permite usar a expansão && e o teste do shell.
+CMD [ "sh", "-lc", "if [ -n \"$DATABASE_URL\" ]; then echo \"🗄️  Running Prisma migrate deploy...\"; npx prisma migrate deploy; else echo \"⚠️  DATABASE_URL not set; skipping prisma migrate deploy.\"; fi && node dist/main.js" ]
